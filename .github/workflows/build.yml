@@ -12,6 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     
     strategy:
+      fail-fast: false
       matrix:
         arch: [arm64, arm]
     
@@ -19,13 +20,27 @@ jobs:
     - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Setup Android NDK
-      uses: android-actions/setup-android@v3
-      
-    - name: Install NDK
+    - name: Find NDK
       run: |
-        sdkmanager --install "ndk;25.2.9519653"
-        echo "ANDROID_NDK=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
+        # 使用 GitHub runner 预装的 NDK
+        if [ -d "$ANDROID_NDK_HOME" ]; then
+          echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> $GITHUB_ENV
+          echo "Using ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
+        elif [ -d "$ANDROID_NDK_ROOT" ]; then
+          echo "ANDROID_NDK=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
+          echo "Using ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
+        elif [ -d "$ANDROID_HOME/ndk-bundle" ]; then
+          echo "ANDROID_NDK=$ANDROID_HOME/ndk-bundle" >> $GITHUB_ENV
+          echo "Using ndk-bundle"
+        else
+          # 查找任何可用的 NDK
+          NDK_PATH=$(find $ANDROID_HOME/ndk -maxdepth 1 -type d | head -2 | tail -1)
+          echo "ANDROID_NDK=$NDK_PATH" >> $GITHUB_ENV
+          echo "Found NDK: $NDK_PATH"
+        fi
+        
+        echo "=== NDK Info ==="
+        ls -la $ANDROID_HOME/ndk/ || true
 
     - name: Clone and patch CEServer source
       run: |
@@ -54,11 +69,7 @@ jobs:
         rm -f ceservertest.c
         
         # ===== 补丁5: 在 ceserver.c 添加 stealth 初始化 =====
-        # 在文件开头添加 include
         sed -i '1i #include "stealth_core.h"' ceserver.c
-        
-        # 在 main 函数开始处添加 stealth_init() 调用
-        # 使用 awk 更可靠
         awk '/int main\(int argc/{found=1} found && /{/{print; print "  stealth_init();"; found=0; next} 1' ceserver.c > ceserver_tmp.c
         mv ceserver_tmp.c ceserver.c
         
@@ -86,12 +97,13 @@ jobs:
         CC="$TOOLCHAIN/bin/${TARGET}${API}-clang"
         STRIP="$TOOLCHAIN/bin/llvm-strip"
         
+        echo "Using CC: $CC"
+        ls -la $TOOLCHAIN/bin/ | head -20
+        
         cd src
         
-        # 编译所有需要的源文件
         SOURCES="ceserver.c api.c porthelp.c symbols.c threads.c stealth_core.c"
         
-        # 添加可选源文件
         for f in extensionloader.c options.c native-api.c; do
           if [ -f "$f" ]; then
             SOURCES="$SOURCES $f"
@@ -131,6 +143,7 @@ jobs:
   package:
     runs-on: ubuntu-latest
     needs: build-android
+    if: always()
     
     steps:
     - name: Download ARM64
@@ -138,18 +151,20 @@ jobs:
       with:
         name: ceserver-stealth-arm64
         path: arm64
+      continue-on-error: true
 
     - name: Download ARM
       uses: actions/download-artifact@v4
       with:
         name: ceserver-stealth-arm
         path: arm
+      continue-on-error: true
 
     - name: Create package
       run: |
         mkdir -p release
-        find arm64 -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm64 \;
-        find arm -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm \;
+        find arm64 -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm64 \; 2>/dev/null || true
+        find arm -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm \; 2>/dev/null || true
         
         cat > release/README.txt << 'EOF'
         CEServer Stealth for Android
