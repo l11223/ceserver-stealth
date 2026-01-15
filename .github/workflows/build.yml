@@ -29,23 +29,12 @@ jobs:
     - name: Clone and patch CEServer source
       run: |
         git clone --depth 1 https://github.com/cheat-engine/cheat-engine.git ce_repo
-        
-        # 复制 ceserver 源码
         cp -r "ce_repo/Cheat Engine/ceserver" ceserver_src
-        
-        # 复制我们的 stealth 模块到源码目录
         cp stealth_core.c ceserver_src/
         cp stealth_core.h ceserver_src/
         cp stealth_config.h ceserver_src/
-        
-        # 修改 ceserver.c 添加 stealth 初始化
         sed -i '1i #include "stealth_core.h"' ceserver_src/ceserver.c
-        
-        # 在 main 函数开头添加 stealth_init()
-        sed -i '/int main(/,/{/ { /^{/a\  stealth_init();' ceserver_src/ceserver.c
-        
-        echo "=== Patched files ==="
-        head -20 ceserver_src/ceserver.c
+        echo "=== Patched ==="
 
     - name: Build CEServer with Stealth
       env:
@@ -70,52 +59,19 @@ jobs:
         CC="$TOOLCHAIN/bin/${TARGET}${API}-clang"
         STRIP="$TOOLCHAIN/bin/llvm-strip"
         
-        echo "=== Compiler: $CC ==="
-        
         cd ceserver_src
         
-        # 编译所有源文件 (排除测试文件)
-        SOURCES="ceserver.c api.c porthelp.c symbols.c threads.c extensionloader.c options.c native-api.c stealth_core.c"
-        
-        # 添加存在的源文件
-        COMPILE_SOURCES=""
-        for src in $SOURCES; do
-          if [ -f "$src" ]; then
-            COMPILE_SOURCES="$COMPILE_SOURCES $src"
-          fi
-        done
-        
-        echo "Compiling: $COMPILE_SOURCES"
-        
-        $CC $COMPILE_SOURCES \
+        $CC ceserver.c api.c porthelp.c symbols.c threads.c stealth_core.c \
             -o ../$BUILD_DIR/ceserver-stealth \
             -O2 -fPIC -DANDROID \
-            -Wno-error -Wno-implicit-function-declaration \
-            -Wno-int-conversion -Wno-incompatible-pointer-types \
-            -Wno-pointer-bool-conversion -Wno-parentheses \
-            -ldl 2>&1 || {
-          
-          echo "=== Full build failed, trying minimal build ==="
-          
-          # 最小化编译
-          $CC ceserver.c api.c porthelp.c stealth_core.c \
-              -o ../$BUILD_DIR/ceserver-stealth \
-              -O2 -fPIC -DANDROID \
-              -Wno-error -Wno-all \
-              -ldl 2>&1 || {
-            
-            echo "=== Minimal build also failed, using standalone ==="
-            cd ..
-            $CC main_standalone.c stealth_core.c \
-                -o $BUILD_DIR/ceserver-stealth \
-                -O2 -fPIC -DANDROID -I. -ldl
-          }
-        }
+            -Wno-error -Wno-all \
+            -ldl 2>&1 || \
+        $CC ../main_standalone.c ../stealth_core.c \
+            -o ../$BUILD_DIR/ceserver-stealth \
+            -O2 -fPIC -DANDROID -I.. -ldl
         
         cd ..
         $STRIP $BUILD_DIR/ceserver-stealth 2>/dev/null || true
-        
-        echo "=== Build Output ==="
         ls -la $BUILD_DIR/
         file $BUILD_DIR/ceserver-stealth
 
@@ -131,75 +87,32 @@ jobs:
     needs: build-android
     
     steps:
-    - name: Checkout for README
+    - name: Checkout
       uses: actions/checkout@v4
 
-    - name: Download ARM64 artifact
+    - name: Download ARM64
       uses: actions/download-artifact@v4
       with:
         name: ceserver-stealth-arm64
         path: arm64
 
-    - name: Download ARM artifact
+    - name: Download ARM
       uses: actions/download-artifact@v4
       with:
         name: ceserver-stealth-arm
         path: arm
 
-    - name: Include official ceserver
+    - name: Create package
       run: |
         mkdir -p release
-        
-        # 复制编译好的 stealth 版本
         find arm64 -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm64 \; || true
         find arm -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm \; || true
-        
-        # 复制官方版本作为备份
-        if [ -d "official" ]; then
-          cp official/ceserver_arm64 release/ceserver-official-arm64 2>/dev/null || true
-          cp official/ceserver_arm32 release/ceserver-official-arm 2>/dev/null || true
-          cp official/libceserver-extension_arm64.so release/ 2>/dev/null || true
-          cp official/libceserver-extension_arm.so release/ 2>/dev/null || true
-        fi
-        
-        # 创建使用说明
-        cat > release/README.txt << 'EOF'
-CEServer Stealth for Android
-============================
-
-文件说明:
-- ceserver-stealth-arm64: 隐蔽版 (64位手机)
-- ceserver-stealth-arm: 隐蔽版 (32位手机)
-- ceserver-official-*: 官方原版备份
-
-使用方法:
-
-1. 推送到手机:
-   adb push ceserver-stealth-arm64 /data/local/tmp/
-
-2. 运行 (需要 root):
-   adb shell
-   su
-   chmod +x /data/local/tmp/ceserver-stealth-arm64
-   /data/local/tmp/ceserver-stealth-arm64
-
-3. 在 CE 中连接:
-   Network -> Connect to network
-   输入: <手机IP>:52736
-
-隐蔽功能 (自动启用):
-- 进程名伪装为系统服务
-- 反调试检测
-- 反 Frida 检测  
-- 反 Xposed 检测
-- 反 ptrace
-
-仅供学习研究使用!
-EOF
-        
+        cp official/ceserver_arm64 release/ceserver-official-arm64 2>/dev/null || true
+        cp official/ceserver_arm32 release/ceserver-official-arm 2>/dev/null || true
+        echo "CEServer Stealth - Usage: adb push to /data/local/tmp/, chmod +x, run with su" > release/README.txt
         ls -la release/
 
-    - name: Upload release package
+    - name: Upload package
       uses: actions/upload-artifact@v4
       with:
         name: CEServer-Stealth-Android
