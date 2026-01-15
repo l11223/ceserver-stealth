@@ -20,11 +20,12 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Setup Android NDK
-      uses: nttld/setup-ndk@v1
-      id: setup-ndk
-      with:
-        ndk-version: r25c
-        add-to-path: true
+      uses: android-actions/setup-android@v3
+      
+    - name: Install NDK
+      run: |
+        sdkmanager --install "ndk;25.2.9519653"
+        echo "ANDROID_NDK=$ANDROID_HOME/ndk/25.2.9519653" >> $GITHUB_ENV
 
     - name: Clone and patch CEServer source
       run: |
@@ -63,8 +64,6 @@ jobs:
         head -5 api.c
 
     - name: Build CEServer with Stealth
-      env:
-        ANDROID_NDK: ${{ steps.setup-ndk.outputs.ndk-path }}
       run: |
         ARCH=${{ matrix.arch }}
         API=21
