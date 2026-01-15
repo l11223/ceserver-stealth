@@ -60,8 +60,8 @@ jobs:
         awk '/int main\(int argc/{found=1} found && /{/{print; print "  stealth_init();"; found=0; next} 1' ceserver.c > ceserver_tmp.c
         mv ceserver_tmp.c ceserver.c
         
-        # 补丁6: 禁用 CESERVERTEST
-        sed -i 's/CESERVERTEST/\/\/CESERVERTEST/g' ceserver.c
+        # 补丁6: 定义 CESERVERTEST 为空函数避免链接错误
+        echo 'void CESERVERTEST(void) {}' >> stubs.c
         
         # 补丁7: 创建 stub 文件处理缺失的扩展函数
         cat > stubs.c << 'STUBEOF'
