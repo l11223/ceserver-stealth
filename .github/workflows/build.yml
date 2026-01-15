@@ -22,56 +22,67 @@ jobs:
 
     - name: Find NDK
       run: |
-        # 使用 GitHub runner 预装的 NDK
         if [ -d "$ANDROID_NDK_HOME" ]; then
           echo "ANDROID_NDK=$ANDROID_NDK_HOME" >> $GITHUB_ENV
-          echo "Using ANDROID_NDK_HOME: $ANDROID_NDK_HOME"
         elif [ -d "$ANDROID_NDK_ROOT" ]; then
           echo "ANDROID_NDK=$ANDROID_NDK_ROOT" >> $GITHUB_ENV
-          echo "Using ANDROID_NDK_ROOT: $ANDROID_NDK_ROOT"
-        elif [ -d "$ANDROID_HOME/ndk-bundle" ]; then
-          echo "ANDROID_NDK=$ANDROID_HOME/ndk-bundle" >> $GITHUB_ENV
-          echo "Using ndk-bundle"
         else
-          # 查找任何可用的 NDK
           NDK_PATH=$(find $ANDROID_HOME/ndk -maxdepth 1 -type d | head -2 | tail -1)
           echo "ANDROID_NDK=$NDK_PATH" >> $GITHUB_ENV
-          echo "Found NDK: $NDK_PATH"
         fi
-        
-        echo "=== NDK Info ==="
-        ls -la $ANDROID_HOME/ndk/ || true
 
     - name: Clone and patch CEServer source
       run: |
         git clone --depth 1 https://github.com/cheat-engine/cheat-engine.git ce_repo
         cp -r "ce_repo/Cheat Engine/ceserver" src
         
-        # 复制 stealth 模块
         cp stealth_core.c src/
         cp stealth_core.h src/
         cp stealth_config.h src/
         
         cd src
         
-        # ===== 补丁1: 修复 api.c 函数指针类型错误 =====
+        # 补丁1: api.c 函数指针
         sed -i 's/write_v=process_vm_writev2;/write_v=(PROCESS_VM_WRITEV)process_vm_writev2;/g' api.c
         sed -i 's/readv=process_vm_readv2;/readv=(PROCESS_VM_READV)process_vm_readv2;/g' api.c
         
-        # ===== 补丁2: 修复 ceserver.c sigaction 错误 =====
+        # 补丁2: sigaction
         sed -i 's/sigaction(SIGPIPE.*SIG_IGN.*NULL);/signal(SIGPIPE, SIG_IGN);/g' ceserver.c
         
-        # ===== 补丁3: 修复 porthelp.c debug_log - 只添加声明，不添加定义 =====
-        # debug_log 已经在 api.c 中定义了，这里只需要声明
+        # 补丁3: porthelp.c debug_log 声明
         sed -i '1i extern void debug_log(const char* fmt, ...);' porthelp.c
         
-        # ===== 补丁4: 删除测试文件 (有很多错误) =====
+        # 补丁4: 删除测试文件
         rm -f ceservertest.c
         
-        # ===== 补丁5: 在 ceserver.c 添加 stealth 初始化 =====
+        # 补丁5: 添加 stealth 初始化
         sed -i '1i #include "stealth_core.h"' ceserver.c
         awk '/int main\(int argc/{found=1} found && /{/{print; print "  stealth_init();"; found=0; next} 1' ceserver.c > ceserver_tmp.c
         mv ceserver_tmp.c ceserver.c
+        
+        # 补丁6: 禁用 CESERVERTEST
+        sed -i 's/CESERVERTEST/\/\/CESERVERTEST/g' ceserver.c
+        
+        # 补丁7: 创建 stub 文件处理缺失的扩展函数
+        cat > stubs.c << 'STUBEOF'
+        #include <stdint.h>
+        #include <stddef.h>
+        
+        // Extension stubs - 这些功能在 stealth 版本中禁用
+        int ext_loadModuleEx(void* p1, void* p2, void* p3) { return 0; }
+        int ext_loadModule(void* p1, void* p2) { return 0; }
+        void ext_free(void* p) {}
+        int ext_changememoryprotection(void* p1, size_t s, int prot) { return 0; }
+        int ext_createThread(void* p1, void* p2) { return 0; }
+        void* ext_alloc(void* p1, size_t s) { return NULL; }
+        int ext_speedhack_setSpeed(float speed) { return 0; }
+        
+        // Context stubs for architectures without ptrace context support
+        #if defined(__arm__) || defined(__aarch64__)
+        int getContext(int tid, void* ctx) { return -1; }
+        int setContext(int tid, void* ctx) { return -1; }
+        #endif
+        STUBEOF
         
         echo "=== Patches applied ==="
         head -10 ceserver.c
@@ -97,14 +108,13 @@ jobs:
         CC="$TOOLCHAIN/bin/${TARGET}${API}-clang"
         STRIP="$TOOLCHAIN/bin/llvm-strip"
         
-        echo "Using CC: $CC"
-        ls -la $TOOLCHAIN/bin/ | head -20
-        
         cd src
         
-        SOURCES="ceserver.c api.c porthelp.c symbols.c threads.c stealth_core.c"
+        # 核心源文件
+        SOURCES="ceserver.c api.c porthelp.c symbols.c threads.c stealth_core.c stubs.c"
         
-        for f in extensionloader.c options.c native-api.c; do
+        # 可选源文件
+        for f in native-api.c; do
           if [ -f "$f" ]; then
             SOURCES="$SOURCES $f"
           fi
@@ -115,6 +125,7 @@ jobs:
         $CC $SOURCES \
             -o ../$BUILD_DIR/ceserver-stealth \
             -O2 -fPIC -DANDROID \
+            -DNO_EXTENSIONS \
             -Wno-error \
             -Wno-implicit-function-declaration \
             -Wno-int-conversion \
@@ -124,7 +135,7 @@ jobs:
             -Wno-parentheses \
             -Wno-unused-variable \
             -Wno-unused-but-set-variable \
-            -ldl
+            -llog -lz -ldl
         
         cd ..
         $STRIP $BUILD_DIR/ceserver-stealth
