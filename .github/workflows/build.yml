@@ -61,9 +61,9 @@ jobs:
         # ===== 补丁2: 修复 ceserver.c sigaction 错误 =====
         sed -i 's/sigaction(SIGPIPE.*SIG_IGN.*NULL);/signal(SIGPIPE, SIG_IGN);/g' ceserver.c
         
-        # ===== 补丁3: 修复 porthelp.c debug_log 未声明 =====
-        sed -i '1i void debug_log(const char* fmt, ...);' porthelp.c
-        echo 'void debug_log(const char* fmt, ...) {}' >> porthelp.c
+        # ===== 补丁3: 修复 porthelp.c debug_log - 只添加声明，不添加定义 =====
+        # debug_log 已经在 api.c 中定义了，这里只需要声明
+        sed -i '1i extern void debug_log(const char* fmt, ...);' porthelp.c
         
         # ===== 补丁4: 删除测试文件 (有很多错误) =====
         rm -f ceservertest.c
