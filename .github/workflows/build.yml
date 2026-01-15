@@ -60,29 +60,36 @@ jobs:
         awk '/int main\(int argc/{found=1} found && /{/{print; print "  stealth_init();"; found=0; next} 1' ceserver.c > ceserver_tmp.c
         mv ceserver_tmp.c ceserver.c
         
-        # 补丁6: 定义 CESERVERTEST 为空函数避免链接错误
-        echo 'void CESERVERTEST(void) {}' >> stubs.c
-        
-        # 补丁7: 创建 stub 文件处理缺失的扩展函数
+        # 补丁6: 创建 stub 文件处理所有缺失的函数
         cat > stubs.c << 'STUBEOF'
-        #include <stdint.h>
-        #include <stddef.h>
-        
-        // Extension stubs - 这些功能在 stealth 版本中禁用
-        int ext_loadModuleEx(void* p1, void* p2, void* p3) { return 0; }
-        int ext_loadModule(void* p1, void* p2) { return 0; }
-        void ext_free(void* p) {}
-        int ext_changememoryprotection(void* p1, size_t s, int prot) { return 0; }
-        int ext_createThread(void* p1, void* p2) { return 0; }
-        void* ext_alloc(void* p1, size_t s) { return NULL; }
-        int ext_speedhack_setSpeed(float speed) { return 0; }
-        
-        // Context stubs for architectures without ptrace context support
-        #if defined(__arm__) || defined(__aarch64__)
-        int getContext(int tid, void* ctx) { return -1; }
-        int setContext(int tid, void* ctx) { return -1; }
-        #endif
-        STUBEOF
+#include <stdint.h>
+#include <stddef.h>
+
+// Extension stubs
+int ext_loadModuleEx(void* p1, void* p2, void* p3) { return 0; }
+int ext_loadModule(void* p1, void* p2) { return 0; }
+void ext_free(void* p) {}
+int ext_changememoryprotection(void* p1, size_t s, int prot) { return 0; }
+int ext_createThread(void* p1, void* p2) { return 0; }
+void* ext_alloc(void* p1, size_t s) { return NULL; }
+int ext_speedhack_setSpeed(float speed) { return 0; }
+
+// Options stubs
+int handleGetOption(void* p1) { return 0; }
+int handleGetOptions(void* p1) { return 0; }
+int handleSetOption(void* p1) { return 0; }
+
+// Extension loader stubs
+int loadCEServerExtension(void* p1) { return 0; }
+void* allocWithoutExtension(void* p1, size_t s) { return NULL; }
+
+// Test stub
+void CESERVERTEST(void) {}
+
+// Context stubs
+int getContext(int tid, void* ctx) { return -1; }
+int setContext(int tid, void* ctx) { return -1; }
+STUBEOF
         
         echo "=== Patches applied ==="
         head -10 ceserver.c
