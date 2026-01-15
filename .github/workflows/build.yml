@@ -60,39 +60,28 @@ jobs:
         awk '/int main\(int argc/{found=1} found && /{/{print; print "  stealth_init();"; found=0; next} 1' ceserver.c > ceserver_tmp.c
         mv ceserver_tmp.c ceserver.c
         
-        # 补丁6: 创建 stub 文件处理所有缺失的函数
-        cat > stubs.c << 'STUBEOF'
-#include <stdint.h>
-#include <stddef.h>
-
-// Extension stubs
-int ext_loadModuleEx(void* p1, void* p2, void* p3) { return 0; }
-int ext_loadModule(void* p1, void* p2) { return 0; }
-void ext_free(void* p) {}
-int ext_changememoryprotection(void* p1, size_t s, int prot) { return 0; }
-int ext_createThread(void* p1, void* p2) { return 0; }
-void* ext_alloc(void* p1, size_t s) { return NULL; }
-int ext_speedhack_setSpeed(float speed) { return 0; }
-
-// Options stubs
-int handleGetOption(void* p1) { return 0; }
-int handleGetOptions(void* p1) { return 0; }
-int handleSetOption(void* p1) { return 0; }
-
-// Extension loader stubs
-int loadCEServerExtension(void* p1) { return 0; }
-void* allocWithoutExtension(void* p1, size_t s) { return NULL; }
-
-// Test stub
-void CESERVERTEST(void) {}
-
-// Context stubs
-int getContext(int tid, void* ctx) { return -1; }
-int setContext(int tid, void* ctx) { return -1; }
-STUBEOF
+        # 补丁6: 创建 stub 文件
+        echo '#include <stdint.h>' > stubs.c
+        echo '#include <stddef.h>' >> stubs.c
+        echo 'int ext_loadModuleEx(void* p1, void* p2, void* p3) { return 0; }' >> stubs.c
+        echo 'int ext_loadModule(void* p1, void* p2) { return 0; }' >> stubs.c
+        echo 'void ext_free(void* p) {}' >> stubs.c
+        echo 'int ext_changememoryprotection(void* p1, size_t s, int prot) { return 0; }' >> stubs.c
+        echo 'int ext_createThread(void* p1, void* p2) { return 0; }' >> stubs.c
+        echo 'void* ext_alloc(void* p1, size_t s) { return NULL; }' >> stubs.c
+        echo 'int ext_speedhack_setSpeed(float speed) { return 0; }' >> stubs.c
+        echo 'int handleGetOption(void* p1) { return 0; }' >> stubs.c
+        echo 'int handleGetOptions(void* p1) { return 0; }' >> stubs.c
+        echo 'int handleSetOption(void* p1) { return 0; }' >> stubs.c
+        echo 'int loadCEServerExtension(void* p1) { return 0; }' >> stubs.c
+        echo 'void* allocWithoutExtension(void* p1, size_t s) { return NULL; }' >> stubs.c
+        echo 'void CESERVERTEST(void) {}' >> stubs.c
+        echo 'int getContext(int tid, void* ctx) { return -1; }' >> stubs.c
+        echo 'int setContext(int tid, void* ctx) { return -1; }' >> stubs.c
         
         echo "=== Patches applied ==="
         head -10 ceserver.c
+        cat stubs.c
 
     - name: Build CEServer with Stealth
       run: |
@@ -117,10 +106,8 @@ STUBEOF
         
         cd src
         
-        # 核心源文件
         SOURCES="ceserver.c api.c porthelp.c symbols.c threads.c stealth_core.c stubs.c"
         
-        # 可选源文件
         for f in native-api.c; do
           if [ -f "$f" ]; then
             SOURCES="$SOURCES $f"
@@ -183,27 +170,10 @@ STUBEOF
         mkdir -p release
         find arm64 -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm64 \; 2>/dev/null || true
         find arm -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm \; 2>/dev/null || true
-        
-        cat > release/README.txt << 'EOF'
-        CEServer Stealth for Android
-        =============================
-        
-        Usage:
-          adb push ceserver-stealth-arm64 /data/local/tmp/
-          adb shell
-          su
-          chmod +x /data/local/tmp/ceserver-stealth-arm64
-          /data/local/tmp/ceserver-stealth-arm64
-        
-        CE connect: phone_ip:52736
-        
-        Stealth features:
-          - Process name disguise
-          - Anti-debug detection
-          - Anti-Frida detection
-          - Anti-Xposed detection
-        EOF
-        
+        echo "CEServer Stealth for Android" > release/README.txt
+        echo "Usage: adb push ceserver-stealth-arm64 /data/local/tmp/" >> release/README.txt
+        echo "Then: adb shell su -c /data/local/tmp/ceserver-stealth-arm64" >> release/README.txt
+        echo "CE connect: phone_ip:52736" >> release/README.txt
         ls -la release/
 
     - name: Upload package
