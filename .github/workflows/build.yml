@@ -44,24 +44,26 @@ jobs:
         sed -i 's/readv=process_vm_readv2;/readv=(PROCESS_VM_READV)process_vm_readv2;/g' api.c
         
         # ===== 补丁2: 修复 ceserver.c sigaction 错误 =====
-        sed -i 's/sigaction(SIGPIPE, \&(struct sigaction){SIG_IGN}, NULL);/signal(SIGPIPE, SIG_IGN);/g' ceserver.c
+        sed -i 's/sigaction(SIGPIPE.*SIG_IGN.*NULL);/signal(SIGPIPE, SIG_IGN);/g' ceserver.c
         
         # ===== 补丁3: 修复 porthelp.c debug_log 未声明 =====
         sed -i '1i void debug_log(const char* fmt, ...);' porthelp.c
+        echo 'void debug_log(const char* fmt, ...) {}' >> porthelp.c
         
         # ===== 补丁4: 删除测试文件 (有很多错误) =====
         rm -f ceservertest.c
         
         # ===== 补丁5: 在 ceserver.c 添加 stealth 初始化 =====
+        # 在文件开头添加 include
         sed -i '1i #include "stealth_core.h"' ceserver.c
-        sed -i '/int main(int argc/,/{/{/a\  stealth_init();' ceserver.c
         
-        # ===== 补丁6: 添加缺失的函数声明 =====
-        echo 'void debug_log(const char* fmt, ...) {}' >> porthelp.c
+        # 在 main 函数开始处添加 stealth_init() 调用
+        # 使用 awk 更可靠
+        awk '/int main\(int argc/{found=1} found && /{/{print; print "  stealth_init();"; found=0; next} 1' ceserver.c > ceserver_tmp.c
+        mv ceserver_tmp.c ceserver.c
         
         echo "=== Patches applied ==="
-        head -5 ceserver.c
-        head -5 api.c
+        head -10 ceserver.c
 
     - name: Build CEServer with Stealth
       run: |
@@ -149,23 +151,25 @@ jobs:
         find arm64 -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm64 \;
         find arm -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm \;
         
-        echo "CEServer Stealth for Android" > release/README.txt
-        echo "=============================" >> release/README.txt
-        echo "" >> release/README.txt
-        echo "Usage:" >> release/README.txt
-        echo "  adb push ceserver-stealth-arm64 /data/local/tmp/" >> release/README.txt
-        echo "  adb shell" >> release/README.txt
-        echo "  su" >> release/README.txt
-        echo "  chmod +x /data/local/tmp/ceserver-stealth-arm64" >> release/README.txt
-        echo "  /data/local/tmp/ceserver-stealth-arm64" >> release/README.txt
-        echo "" >> release/README.txt
-        echo "CE connect: phone_ip:52736" >> release/README.txt
-        echo "" >> release/README.txt
-        echo "Stealth features:" >> release/README.txt
-        echo "  - Process name disguise" >> release/README.txt
-        echo "  - Anti-debug detection" >> release/README.txt
-        echo "  - Anti-Frida detection" >> release/README.txt
-        echo "  - Anti-Xposed detection" >> release/README.txt
+        cat > release/README.txt << 'EOF'
+        CEServer Stealth for Android
+        =============================
+        
+        Usage:
+          adb push ceserver-stealth-arm64 /data/local/tmp/
+          adb shell
+          su
+          chmod +x /data/local/tmp/ceserver-stealth-arm64
+          /data/local/tmp/ceserver-stealth-arm64
+        
+        CE connect: phone_ip:52736
+        
+        Stealth features:
+          - Process name disguise
+          - Anti-debug detection
+          - Anti-Frida detection
+          - Anti-Xposed detection
+        EOF
         
         ls -la release/
 
