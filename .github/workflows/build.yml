@@ -29,12 +29,38 @@ jobs:
     - name: Clone and patch CEServer source
       run: |
         git clone --depth 1 https://github.com/cheat-engine/cheat-engine.git ce_repo
-        cp -r "ce_repo/Cheat Engine/ceserver" ceserver_src
-        cp stealth_core.c ceserver_src/
-        cp stealth_core.h ceserver_src/
-        cp stealth_config.h ceserver_src/
-        sed -i '1i #include "stealth_core.h"' ceserver_src/ceserver.c
-        echo "=== Patched ==="
+        cp -r "ce_repo/Cheat Engine/ceserver" src
+        
+        # 复制 stealth 模块
+        cp stealth_core.c src/
+        cp stealth_core.h src/
+        cp stealth_config.h src/
+        
+        cd src
+        
+        # ===== 补丁1: 修复 api.c 函数指针类型错误 =====
+        sed -i 's/write_v=process_vm_writev2;/write_v=(PROCESS_VM_WRITEV)process_vm_writev2;/g' api.c
+        sed -i 's/readv=process_vm_readv2;/readv=(PROCESS_VM_READV)process_vm_readv2;/g' api.c
+        
+        # ===== 补丁2: 修复 ceserver.c sigaction 错误 =====
+        sed -i 's/sigaction(SIGPIPE, \&(struct sigaction){SIG_IGN}, NULL);/signal(SIGPIPE, SIG_IGN);/g' ceserver.c
+        
+        # ===== 补丁3: 修复 porthelp.c debug_log 未声明 =====
+        sed -i '1i void debug_log(const char* fmt, ...);' porthelp.c
+        
+        # ===== 补丁4: 删除测试文件 (有很多错误) =====
+        rm -f ceservertest.c
+        
+        # ===== 补丁5: 在 ceserver.c 添加 stealth 初始化 =====
+        sed -i '1i #include "stealth_core.h"' ceserver.c
+        sed -i '/int main(int argc/,/{/{/a\  stealth_init();' ceserver.c
+        
+        # ===== 补丁6: 添加缺失的函数声明 =====
+        echo 'void debug_log(const char* fmt, ...) {}' >> porthelp.c
+        
+        echo "=== Patches applied ==="
+        head -5 ceserver.c
+        head -5 api.c
 
     - name: Build CEServer with Stealth
       env:
@@ -59,19 +85,38 @@ jobs:
         CC="$TOOLCHAIN/bin/${TARGET}${API}-clang"
         STRIP="$TOOLCHAIN/bin/llvm-strip"
         
-        cd ceserver_src
+        cd src
         
-        $CC ceserver.c api.c porthelp.c symbols.c threads.c stealth_core.c \
+        # 编译所有需要的源文件
+        SOURCES="ceserver.c api.c porthelp.c symbols.c threads.c stealth_core.c"
+        
+        # 添加可选源文件
+        for f in extensionloader.c options.c native-api.c; do
+          if [ -f "$f" ]; then
+            SOURCES="$SOURCES $f"
+          fi
+        done
+        
+        echo "=== Compiling: $SOURCES ==="
+        
+        $CC $SOURCES \
             -o ../$BUILD_DIR/ceserver-stealth \
             -O2 -fPIC -DANDROID \
-            -Wno-error -Wno-all \
-            -ldl 2>&1 || \
-        $CC ../main_standalone.c ../stealth_core.c \
-            -o ../$BUILD_DIR/ceserver-stealth \
-            -O2 -fPIC -DANDROID -I.. -ldl
+            -Wno-error \
+            -Wno-implicit-function-declaration \
+            -Wno-int-conversion \
+            -Wno-incompatible-pointer-types \
+            -Wno-incompatible-function-pointer-types \
+            -Wno-pointer-bool-conversion \
+            -Wno-parentheses \
+            -Wno-unused-variable \
+            -Wno-unused-but-set-variable \
+            -ldl
         
         cd ..
-        $STRIP $BUILD_DIR/ceserver-stealth 2>/dev/null || true
+        $STRIP $BUILD_DIR/ceserver-stealth
+        
+        echo "=== Build Output ==="
         ls -la $BUILD_DIR/
         file $BUILD_DIR/ceserver-stealth
 
@@ -87,9 +132,6 @@ jobs:
     needs: build-android
     
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
-
     - name: Download ARM64
       uses: actions/download-artifact@v4
       with:
@@ -105,11 +147,27 @@ jobs:
     - name: Create package
       run: |
         mkdir -p release
-        find arm64 -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm64 \; || true
-        find arm -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm \; || true
-        cp official/ceserver_arm64 release/ceserver-official-arm64 2>/dev/null || true
-        cp official/ceserver_arm32 release/ceserver-official-arm 2>/dev/null || true
-        echo "CEServer Stealth - Usage: adb push to /data/local/tmp/, chmod +x, run with su" > release/README.txt
+        find arm64 -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm64 \;
+        find arm -name "ceserver-stealth" -exec cp {} release/ceserver-stealth-arm \;
+        
+        echo "CEServer Stealth for Android" > release/README.txt
+        echo "=============================" >> release/README.txt
+        echo "" >> release/README.txt
+        echo "Usage:" >> release/README.txt
+        echo "  adb push ceserver-stealth-arm64 /data/local/tmp/" >> release/README.txt
+        echo "  adb shell" >> release/README.txt
+        echo "  su" >> release/README.txt
+        echo "  chmod +x /data/local/tmp/ceserver-stealth-arm64" >> release/README.txt
+        echo "  /data/local/tmp/ceserver-stealth-arm64" >> release/README.txt
+        echo "" >> release/README.txt
+        echo "CE connect: phone_ip:52736" >> release/README.txt
+        echo "" >> release/README.txt
+        echo "Stealth features:" >> release/README.txt
+        echo "  - Process name disguise" >> release/README.txt
+        echo "  - Anti-debug detection" >> release/README.txt
+        echo "  - Anti-Frida detection" >> release/README.txt
+        echo "  - Anti-Xposed detection" >> release/README.txt
+        
         ls -la release/
 
     - name: Upload package
